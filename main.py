@@ -2,6 +2,7 @@ import os
 import json
 from utils import get_song_lyrics, get_spotify_url
 
+
 # JSON Verilerini Kaydetme
 def save_song_data(song_name, artist_name=None):
     data_folder = "data"
@@ -28,8 +29,9 @@ def save_song_data(song_name, artist_name=None):
         try:
             with open(all_songs_file, "r", encoding="utf-8") as file:
                 all_songs = json.load(file)
-        except json.JSONDecodeError:
-            print("Hatalı JSON formatı. Dosya sıfırlanacak.")
+        except (json.JSONDecodeError, FileNotFoundError):
+            print("Hatalı veya eksik JSON dosyası. Dosya sıfırlanıyor...")
+            all_songs = []
 
     # Şarkının zaten kaydedilmiş olup olmadığını kontrol et
     for song in all_songs:
@@ -60,39 +62,49 @@ def search_and_analyze(query):
             json.dump([], file, ensure_ascii=False, indent=4)
 
     # Şarkıları yükle
-    with open(all_songs_file, "r", encoding="utf-8") as file:
-        all_songs = json.load(file)
+    try:
+        with open(all_songs_file, "r", encoding="utf-8") as file:
+            all_songs = json.load(file)
+    except (json.JSONDecodeError, FileNotFoundError):
+        print("Hatalı veya boş JSON dosyası. Dosya sıfırlanıyor...")
+        all_songs = []
+        with open(all_songs_file, "w", encoding="utf-8") as file:
+            json.dump(all_songs, file, ensure_ascii=False, indent=4)
 
     # Sorguya uygun şarkıları bul
-    matching_songs = []
     query_normalized = query.lower()
-
+    matching_songs = []
     for song in all_songs:
         lyrics = song.get("lyrics", "").lower()
         if query_normalized in lyrics:
             count = lyrics.count(query_normalized)
             matching_songs.append({**song, "query_count": count})
 
-    # Şarkıları sıralama
+    # Eğer şarkılar arasında kelime bulunuyorsa
     if matching_songs:
+        # En çok geçen şarkıdan en aza sıralama
         matching_songs = sorted(matching_songs, key=lambda x: x["query_count"], reverse=True)
-
-        print(f"\n'{query}' kelimesi geçen şarkılar:")
+        print(f"\n'{query}' kelimesi geçen şarkılar (En çoktan en aza sıralı):")
         for song in matching_songs:
             print(f"Şarkı: {song['title']} - Sanatçı: {song['artist']}")
             print(f"Sözler:\n{song['lyrics']}\n")
             print(f"'{query}' kelimesi {song['query_count']} kez geçiyor.")
             print(f"Spotify URL: {song.get('spotify_url', 'Bulunamadı')}\n")
-    else:
-        print(f"'{query}' kelimesi şarkılarda bulunamadı.")
-        song_name = input("Şarkının adını girin: ")
-        artist_name = input("Sanatçının adını girin (opsiyonel): ")
-        new_song = save_song_data(song_name, artist_name)
+        return
 
-        if new_song:
-            print(f"'{query}' sorgusu için yeni şarkı eklendi. Lütfen tekrar arama yapın.")
-        else:
-            print("Şarkı bilgileri alınamadı.")
+    # Eğer kelime şarkılarda yoksa yeni şarkı ekle
+    print(f"'{query}' kelimesi şarkılarda bulunamadı.")
+    song_name = input("Eklenecek şarkının adını girin: ")
+    artist_name = input("Eklenecek şarkının sanatçısını girin (opsiyonel): ")
+
+    new_song = save_song_data(song_name, artist_name)
+
+    if new_song:
+        # Yeni şarkı eklenince kelimeyi tekrar kontrol et
+        print(f"\n'{query}' kelimesi yeni şarkı eklendikten sonra tekrar analiz ediliyor...\n")
+        search_and_analyze(query)
+    else:
+        print("Şarkı eklenirken hata oluştu.")
 
 
 # Kullanıcıdan sorgu alıp şarkı bilgilerini kaydet veya arama yap
