@@ -1,53 +1,98 @@
+import os
+import json
 import lyricsgenius
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
 
-# Genius API Ayarları
-genius = lyricsgenius.Genius("4KBzJjaPY1SStmY5jDlGLLpbOfVZlnnn_1K_dat_m4AdlCPU0gH1qCA4PPV05SEbs0J37ySa6-N7h0LifehShg")  # Buraya kendi Genius API anahtarınızı yapıştırın
+def get_song_lyrics(title, artist):
+    """Genius API'den şarkı sözlerini alır."""
+    genius_api_key = os.getenv("GENIUS_API_KEY")
+    genius = lyricsgenius.Genius(genius_api_key)
+    
+    try:
+        song = genius.search_song(title, artist)
+        if song:
+            return {
+                "title": song.title,
+                "artist": song.artist,
+                "lyrics": song.lyrics,
+                "spotify_url": song.url
+            }
+        else:
+            return None
+    except Exception as e:
+        print(f"Şarkı sözlerini alırken hata oluştu: {e}")
+        return None
 
-# Spotify API Ayarları
-client_id = "6ca7fbbd2e80456fa8e46225699bbbdc"  # Spotify client ID'nizi buraya yapıştırın
-client_secret = "22e45d9962894bde9d1807de5fd3a9d2"  # Spotify secret key'inizi buraya yapıştırın
-auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
-sp = spotipy.Spotify(auth_manager=auth_manager)
-
-# Genius API ile Şarkı Sözlerini Çekme
-def get_song_lyrics(song_name, artist_name=None):
-    song = genius.search_song(song_name, artist_name)
-    if song:
-        return {"title": song.title, "artist": song.artist, "lyrics": song.lyrics}
-    return None
-
-# Spotify API ile Şarkı URL'sini Çekme
-def get_spotify_url(song_name, artist_name=None):
-    query = f"{song_name} {artist_name}" if artist_name else song_name
-    results = sp.search(q=query, type="track", limit=1)
-    if results.get("tracks") and results["tracks"]["items"]:
-        track = results["tracks"]["items"][0]
-        return track.get("external_urls", {}).get("spotify", None)
-    return None
-
-# Şarkı Arama Fonksiyonu
-def search_songs(query):
+def save_song_to_json(song_data):
+    """Şarkıyı JSON dosyasına kaydeder."""
     data_folder = "data"
-    results = []
-
-    if not os.path.exists(data_folder):
-        print("Veri klasörü bulunamadı.")
-        return
-
-    for filename in os.listdir(data_folder):
-        if filename.endswith(".json") and filename != "all_songs.json":
-            file_path = os.path.join(data_folder, filename)
-            with open(file_path, "r", encoding="utf-8") as file:
-                song_data = json.load(file)
-                if "lyrics" in song_data and query.lower() in song_data["lyrics"].lower():
-                    results.append(song_data)
-
-    if results:
-        print("Arama Sonuçları:")
-        for song in results:
-            print(f"- {song['title']} by {song['artist']}")
-            print(f"Spotify URL: {song.get('spotify_url', 'Bulunamadı')}\n")
+    os.makedirs(data_folder, exist_ok=True)
+    all_songs_file = os.path.join(data_folder, "all_songs.json")
+    
+    # JSON dosyasını yükle veya yeni bir liste oluştur
+    if os.path.exists(all_songs_file):
+        with open(all_songs_file, "r", encoding="utf-8") as file:
+            all_songs = json.load(file)
     else:
-        print("Şarkı bulunamadı.")
+        all_songs = []
+    
+    # Şarkının zaten kaydedilmiş olup olmadığını kontrol et
+    for existing_song in all_songs:
+        if existing_song["title"] == song_data["title"] and existing_song["artist"] == song_data["artist"]:
+            print("Bu şarkı zaten kayıtlı.")
+            return
+    
+    # Yeni şarkıyı ekle
+    all_songs.append(song_data)
+    with open(all_songs_file, "w", encoding="utf-8") as file:
+        json.dump(all_songs, file, ensure_ascii=False, indent=4)
+    print(f"'{song_data['title']}' şarkısı kaydedildi.")
+
+def search_and_analyze(query):
+    """Şarkı sözlerinde verilen sorguyu arar."""
+    data_folder = "data"
+    all_songs_file = os.path.join(data_folder, "all_songs.json")
+    
+    if not os.path.exists(all_songs_file):
+        print("Veri dosyası bulunamadı. Yeni dosya oluşturulacak.")
+        with open(all_songs_file, "w", encoding="utf-8") as file:
+            json.dump([], file, ensure_ascii=False, indent=4)
+    
+    with open(all_songs_file, "r", encoding="utf-8") as file:
+        all_songs = json.load(file)
+    
+    matching_songs = []
+    query_normalized = query.lower().replace("ı", "i").replace("ş", "s").replace("ç", "c").replace("ğ", "g").replace("ü", "u").replace("ö", "o")
+    
+    for song in all_songs:
+        lyrics = song.get("lyrics", "").lower()
+        lyrics_normalized = lyrics.replace("ı", "i").replace("ş", "s").replace("ç", "c").replace("ğ", "g").replace("ü", "u").replace("ö", "o")
+        if query_normalized in lyrics_normalized:
+            count = lyrics_normalized.count(query_normalized)
+            matching_songs.append({**song, "query_count": count})
+    
+    if not matching_songs:
+        print(f"'{query}' kelimesi şarkılarda bulunamadı. Yeni şarkı eklenebilir.")
+        title = input("Şarkının adını girin: ")
+        artist = input("Sanatçının adını girin: ")
+        
+        # Şarkıyı Genius API'den al ve JSON dosyasına ekle
+        song_data = get_song_lyrics(title, artist)
+        if song_data:
+            save_song_to_json(song_data)
+            print(f"'{query}' kelimesini içeren şarkı araması için tekrar deneyin.")
+        else:
+            print("Şarkı bulunamadı veya eklenemedi.")
+        return
+    
+    # En çok geçen kelimeyi bul
+    top_song = max(matching_songs, key=lambda x: x["query_count"])
+    
+    # Sonuçları yazdır
+    print(f"En çok '{query}' kelimesi geçen şarkı:")
+    print(f"- Şarkı: {top_song['title']} by {top_song['artist']}")
+    print(f"- Geçiş Sayısı: {top_song['query_count']}")
+    print(f"- Spotify URL: {top_song.get('spotify_url', 'Bulunamadı')}\n")
+    
+    print("Diğer şarkılar:")
+    for song in matching_songs:
+        print(f"- {song['title']} by {song['artist']} (Geçiş Sayısı: {song['query_count']})")
